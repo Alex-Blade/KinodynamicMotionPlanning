@@ -5,7 +5,7 @@ from typing import Tuple, Union, Type, List
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as pat
-from scipy.spatial.kdtree import KDTree
+import rtree
 from shapely.geometry import Polygon, Point, MultiPolygon, LineString, GeometryCollection
 from pathplanning.types import *
 
@@ -20,7 +20,6 @@ class Obstacle:
         bounding_box: Coordinates of a bounding box of the polygon
         center: Coordinates of the center point of the polygon
         polygon: Instance of shapely.geometry.Polygon
-        radius: Radius of a circle that would cover the whole Obstacle
     """
     points: List[Position]
     bounding_box: Union[Tuple[Position, Position, Position, Position]] = field(init=False)
@@ -36,8 +35,13 @@ class Obstacle:
         #                      max(self.points, key=o1)[1])
         self.polygon = Polygon(self.points)
         self.bounding_box = self.polygon.bounds
+        self.bounding_box = (  # Artificially increase boundaries
+            self.bounding_box[0] * 0.98,
+            self.bounding_box[1] * 0.98,
+            self.bounding_box[2] * 1.02,
+            self.bounding_box[3] * 1.02
+        )
         self.center = self.polygon.centroid.coords[0]
-        self.radius = max([np.linalg.norm(np.asarray(self.center) - np.asarray(p)) for p in self.bounding_box])
 
     @classmethod
     def generate_random(cls: Type["Obstacle"],
@@ -86,20 +90,18 @@ class Map:
     """
     Two-dimensional map representation that holds polygonal obstacles.
 
-    map_limits: Size of a two-dimensional map
-    obstacles: A list of Obstacles
-    kdtree: KDTree that holds obstacles
-    max_radius: Maximum radius that will be queried in KDTree
+    Attrs:
+        map_limits: Size of a two-dimensional map
+        obstacles: A list of Obstacles
+        rtree: RTree that holds obstacles
     """
     map_limits: Tuple[Number, Number]
     obstacles: List[Obstacle] = field(default_factory=list)
 
     def __post_init__(self):
-        self.kdtree = KDTree([o.center for o in self.obstacles])
-        self.max_radius = max(self.obstacles, key=attrgetter("radius")).radius + 0.05
-        # TODO: rethink this part...
-        # When obstacles in the map are big (like in a labyrinth) we are essentially scanning the whole map
-        # because max_radius is enormous.
+        self.rtree = rtree.Index()
+        for obstacle in self.obstacles:
+            self.rtree.insert(id(obstacle), obstacle.bounding_box)
 
     @classmethod
     def generate_random_map(cls, map_limits: Tuple[Number, Number], num_obstacles: int) -> "Map":
@@ -108,18 +110,6 @@ class Map:
         """
         obstacles = [Obstacle.generate_random(map_limits, 0.05*map_limits[0], 5) for _ in range(num_obstacles)]
         return cls(map_limits, obstacles)
-
-    def get_close_obstacles(self, x: Number, y: Number) -> List[Obstacle]:
-        """
-        Scan KDTree for obstacles that are close to the given point.
-
-        Args:
-            x: X-coordinate of the target point
-            y: Y-coordinate of the target point
-        Returns:
-            A list of Obstacles that are within max_radius of the point
-        """
-        return [self.obstacles[index] for index in self.kdtree.query_ball_point((x, y), r=self.max_radius, workers=-1)]
 
     def is_free(self, x: Number, y: Number) -> bool:
         """
@@ -134,9 +124,8 @@ class Map:
         if not ((0 <= x <= self.map_limits[0]) and (0 <= y <= self.map_limits[1])):
             return False
 
-        for obstacle in self.get_close_obstacles(x, y):
-            if obstacle.collides(x, y):
-                return False
+        if list(self.rtree.intersection((x, y))):
+            return False
         return True
 
     def random_free_point(self) -> Position:

@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from operator import itemgetter
 from typing import List, Tuple, Optional
@@ -186,6 +187,12 @@ class RRT:
         self.goal = goal
 
         for _ in range(num_iterations):
+            if _ % 50000 == 0 and _ != 0:
+                self.map.plot()
+                self.plot(include_nodes=True)
+                plt.show()
+            if (_ + 1) % 100 == 0:
+                logging.info(f"Iteration {_}/{num_iterations}")
             ##############################################################
             #  Step 1. Sample a point                                    #
             ##############################################################
