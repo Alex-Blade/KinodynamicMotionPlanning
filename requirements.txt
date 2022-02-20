@@ -7,8 +7,10 @@ networkx==2.6.3
 numpy==1.22.2
 packaging==21.3
 Pillow==9.0.1
+prefixed==0.3.2
 pyparsing==3.0.7
 python-dateutil==2.8.2
+Rtree==0.9.7
 scipy==1.8.0
 Shapely==1.8.1.post1
 six==1.16.0
