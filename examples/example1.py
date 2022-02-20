@@ -1,9 +1,9 @@
+import logging
+
 import matplotlib.pyplot as plt
-import numpy as np
 
 from pathplanning.environment import Map, Obstacle
 from pathplanning.rrt import RRT
-import logging
 
 
 def main():

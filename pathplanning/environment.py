@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
-from operator import itemgetter, attrgetter
+from operator import itemgetter
 from typing import Tuple, Union, Type, List
 
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.patches as pat
+import matplotlib.pyplot as plt
+import numpy as np
 import rtree
-from shapely.geometry import Polygon, Point, MultiPolygon, LineString, GeometryCollection
+from shapely.geometry import Polygon, Point
+
 from pathplanning.types import *
 
 

@@ -1,12 +1,12 @@
 import logging
 from dataclasses import dataclass, field
-from operator import itemgetter
 from typing import List, Tuple, Optional
 
-import matplotlib.pyplot as plt
-import numpy as np
 import dubins
+import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
+
 from pathplanning.environment import Map
 from pathplanning.types import *
 
