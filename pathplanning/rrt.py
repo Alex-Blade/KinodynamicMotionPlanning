@@ -1,14 +1,21 @@
 import logging
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
+import random
 
 import dubins
+import reeds_shepp
+import matplotlib.animation
 import matplotlib.pyplot as plt
+from matplotlib.animation import PillowWriter
 import networkx as nx
 import numpy as np
 
-from pathplanning.environment import Map
-from pathplanning.types import *
+from pathplanning.environment import Map, Car
+from pathplanning.rrt_types import *
+
+from collections import defaultdict
+from time import perf_counter
 
 
 @dataclass
@@ -45,14 +52,11 @@ class Link:
     cost: Number
 
 
-class Dubins:
-    """
-    Args:
-        turning_radius:
-    """
-    def __init__(self, turning_radius: Number = 1.0, step_size: Number = 0.5):
+class SteeringFunction:
+    def __init__(self, max_edge_len: Number, turning_radius: Number = 1.0, step_size: Number = 0.5):
         self.turning_radius = turning_radius
         self.step_size = step_size
+        self.max_edge_len = max_edge_len
 
     def get_shortest_path(self, source: Position, dest: Position) -> LenPath:
         """
@@ -62,12 +66,11 @@ class Dubins:
             source: Initial point
             dest: Target point
         Returns:
-            Unsampled path (i.e. `dubins._DubinsPath`)
+            Unsampled path
         """
-        path = dubins.shortest_path(source, dest, self.turning_radius)
-        return path.path_length(), path
+        pass
 
-    def sample_points(self, path: dubins._DubinsPath) -> List[Position]:
+    def sample_points(self, path: Any) -> List[Position]:
         """
         Sample points from given unsampled path.
 
@@ -76,8 +79,30 @@ class Dubins:
         Returns:
             A list of points for the robot to follow
         """
-        configurations, _ = path.sample_many(self.step_size)
+        pass
+
+
+class Dubbins(SteeringFunction):
+    def get_shortest_path(self, source: Position, dest: Position) -> LenPath:
+        path = dubins.shortest_path(source, dest, self.turning_radius)
+        return path.path_length(), path
+
+    def sample_points(self, path) -> List[Position]:
+        path_length = path.path_length()
+        segment_length = path_length if path_length < self.max_edge_len else self.max_edge_len
+        segment = path.extract_subpath(segment_length)
+        configurations, _ = segment.sample_many(self.step_size)
         return configurations
+
+
+class ReedsShepp(SteeringFunction):
+    def get_shortest_path(self, source: Position, dest: Position) -> LenPath:
+        path = reeds_shepp.PyReedsSheppPath(source, dest, self.turning_radius)
+        return path.distance(), path
+
+    def sample_points(self, path) -> List[Position]:
+        conf = path.sample(self.step_size)
+        return conf[:int((self.max_edge_len // self.step_size) + 1)]
 
 
 class RRT:
@@ -88,7 +113,6 @@ class RRT:
         nodes: A map that holds instances of Node with coordinates as keys
         edges: nodes: A map that holds instances of Link with two coordinates as keys
         map: An instance of Map
-        local_planner: Dubins solver initialized with `turning_radius` and `step_size`
         goal: Coordinates of the target point with angle
         root: Coordinates of the initial point with angle
         precision: Error level that will be ignored
@@ -97,15 +121,19 @@ class RRT:
         whole_path: A path from `root` to `goal` represented by a list of Node coordinates
     Args:
         _map: An instance of a Map
-        turning_radius: Forward velocity divided by maximum angular velocity # TODO: make dynamic
-        step_size: Discretization that will be used when sampling Dubins path
+        car: An instance of a Car
+        local_planner: An instance of SteeringFunction
         precision: Error level that will be ignored
     """
-    def __init__(self, _map: Map, turning_radius: Number = 1.0, step_size: Number = 0.5, precision=(5, 5, 1)):
+    def __init__(self, _map: Map,
+                 car: Car,
+                 local_planner: SteeringFunction,
+                 precision=(5, 5, 1)):
         self.nodes = {}
         self.edges = {}
         self.map = _map
-        self.local_planner = Dubins(turning_radius, step_size)
+        self.car = car
+        self.local_planner = local_planner
         self.goal = (0, 0, 0)
         self.root = (0, 0, 0)
         self.precision = precision
@@ -125,6 +153,20 @@ class RRT:
             return None
         return nx.shortest_path(self.graph, self.root, self.final_node, weight='weight')
 
+    @property
+    def whole_path_distance(self):
+        path = self.whole_path
+        edges = self.edges.copy()
+        s = 0
+        for inode, jnode in zip(path, path[1:]):
+            val = edges.pop((inode, jnode))
+            if val.path:
+                arr = np.array(val.path)
+                points = arr[:, 0:2]
+                d = np.diff(points, axis=0)
+                s += np.sum(np.hypot(d[:, 0], d[:, 1]))
+        return s
+
     def set_start(self, start: Position):
         """
         Reset the tree and set new start point.
@@ -136,6 +178,8 @@ class RRT:
         self.edges = {}
         self.nodes[start] = Node(start, 0)
         self.root = start
+        self.car.position = start
+        _ = self.car.obstacle  # Initialize
 
     def select_options(self, sample: Position, max_options: int) -> List[Tuple[Position, LenPath]]:
         """
@@ -169,7 +213,16 @@ class RRT:
                 return False
         return True
 
-    def run(self, goal, num_iterations=100, goal_rate=.1):
+    def run_animated(self, path: str, goal: Position, num_iterations=100, goal_rate=.1, fps: int = 5, show_plots: bool = False):
+        fig = plt.gcf()
+        moviewriter = PillowWriter(fps=fps)
+        with moviewriter.saving(fig, path, dpi=100):
+            self.run(goal, num_iterations=num_iterations, goal_rate=goal_rate, show_plots=show_plots, moviewriter=moviewriter)
+        return
+
+    def run(self, goal, num_iterations=100, goal_rate=.1,
+            show_plots: bool = None,
+            moviewriter: matplotlib.animation.MovieWriter = None):
         """
         Execute the algorithm with a graph initialized with the start position.
 
@@ -187,55 +240,65 @@ class RRT:
         self.goal = goal
 
         for _ in range(num_iterations):
-            if _ % 50000 == 0 and _ != 0:
-                self.map.plot()
-                self.plot(include_nodes=True)
-                plt.show()
-            if (_ + 1) % 100 == 0:
-                logging.info(f"Iteration {_}/{num_iterations}")
-            ##############################################################
-            #  Step 1. Sample a point                                    #
-            ##############################################################
+            # Step 1. Sample a point
             if np.random.rand() > 1 - goal_rate:
                 sample = goal
             else:
                 sample = self.map.random_free_point()
 
-            ##############################################################
-            #  Step 2. Find closest points to the sampled                #
-            ##############################################################
-            options = self.select_options(sample, 10)
-
-            ##############################################################
-            # Step 3. Among closest find one with a better path          #
-            ##############################################################
+            # Step 2. Find closest points to the sampled
+            options = [random.choice(self.select_options(sample, 10))]
+            # Step 3. Among closest find one with a better path
 
             # Note, we do not consider all neighbors, meaning that we could be losing good samples
             for node, (distance, dpath) in options:
-                ##############################################################
-                # Step 3.1. Sample Dubins paths and check for intersections  #
-                ##############################################################
+                # Step 3.1. Sample Dubins paths and check for intersections
                 path = self.local_planner.sample_points(dpath)
+                sample = path[-1]
                 for i, point in enumerate(path):
-                    if not self.map.is_free(point[0], point[1]):
+                    free = self.map.is_free(point[0], point[1], car=self.car, phi=point[2])
+                    if moviewriter:
+                        plt.gcf().clear()
+                        self.plot_all(show=False, close=False)
+                        moviewriter.grab_frame()
+                        logging.info(f"Prepared frame #{_}")
+                    if not free:
                         break
                 else:
-                    ##############################################################
-                    # Step 3.2. Add the node to the graph if there's a path      #
-                    ##############################################################
+                    # Step 3.2. Add the node to the graph if there's a path
+                    if show_plots:
+                        if _ % 10 == 0:
+                            self.plot_all(show=True, close=False)
+                    goal_reached = False
+                    for idx, point in enumerate(path):
+                        if self.in_goal_region(point):
+                            sample = point
+                            path = path[:idx + 1]
+                            goal_reached = True
+                            break
+
                     self.nodes[sample] = Node(sample, self.nodes[node].cost + distance)
                     self.nodes[node].destination_list.append(sample)
                     # Adding the Edge
                     self.edges[node, sample] = Link(node, sample, path, distance)
-                    ##############################################################
-                    # Step 3.3. Check if the goal is reached                     #
-                    ##############################################################
-                    if self.in_goal_region(sample):
+                    # Step 3.3. Check if the goal is reached
+                    if goal_reached:
                         self.final_node = sample
-                        return
+                        return _
                     break
 
-    def plot(self, file_name='', close=False, include_nodes=False):
+    def plot_all(self, path='', close=False, show=True):
+        self.map.plot(display=False)
+        self.plot(include_nodes=True)
+        self.car.obstacle.plot()
+        if show:
+            plt.show()
+        if path:
+            plt.savefig(path)
+        if close:
+            plt.close()
+
+    def plot(self, include_nodes=False):
         nodes = list(self.nodes.keys())
         edges = self.edges.copy()
         if (path := self.whole_path) is not None:
@@ -250,7 +313,10 @@ class RRT:
 
         if include_nodes and self.nodes:
             if len(nodes) > 1:
-                plt.scatter(nodes[:, 0], nodes[:, 1], alpha=0.3, c='gray', s=15)
+                try:
+                    plt.scatter(nodes[:, 0], nodes[:, 1], alpha=0.3, c='gray', s=15)
+                except TypeError:
+                    pass
             plt.scatter(self.root[0], self.root[1], c='g')
             plt.scatter(self.goal[0], self.goal[1], c='r')
 
@@ -258,7 +324,3 @@ class RRT:
             if val.path:
                 path = np.array(val.path)
                 plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
-        if file_name:
-            plt.savefig(file_name)
-        if close:
-            plt.close()
