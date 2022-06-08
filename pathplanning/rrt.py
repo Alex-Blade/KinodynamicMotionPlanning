@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Any
 import random
+from itertools import chain
 
 import dubins
 import reeds_shepp
@@ -30,6 +31,7 @@ class Node:
     """
 
     position: Position
+    parent: Optional[Position]
     cost: Number
     destination_list: List["Node"] = field(init=False, default_factory=list)
 
@@ -117,7 +119,6 @@ class RRT:
         root: Coordinates of the initial point with angle
         precision: Error level that will be ignored
         final_node: Node that was chosen as final withing the precision
-        graph: Instance of nx.DiGraph that represents all current Links in adjacency matrix
         whole_path: A path from `root` to `goal` represented by a list of Node coordinates
     Args:
         _map: An instance of a Map
@@ -137,21 +138,20 @@ class RRT:
         self.goal = (0, 0, 0)
         self.root = (0, 0, 0)
         self.precision = precision
-        self.final_node = None
-
-    @property
-    def graph(self):
-        graph = nx.DiGraph()
-        [graph.add_node(n) for n in self.nodes]
-        for inode, jnode in self.edges:
-            graph.add_edge(inode, jnode, weight=self.edges[inode, jnode].cost)
-        return graph
+        self.final_node: Optional[Node] = None
 
     @property
     def whole_path(self) -> Optional[List[Position]]:
         if self.final_node is None:
             return None
-        return nx.shortest_path(self.graph, self.root, self.final_node, weight='weight')
+        path = []
+        node = self.nodes[self.final_node]
+        while node.parent is not None:
+            path.append(node.position)
+            node = node.parent
+        path.append(node.position)
+        path.reverse()
+        return path
 
     @property
     def whole_path_distance(self):
@@ -176,7 +176,7 @@ class RRT:
         """
         self.nodes = {}
         self.edges = {}
-        self.nodes[start] = Node(start, 0)
+        self.nodes[start] = Node(start, None, 0)
         self.root = start
         self.car.position = start
         _ = self.car.obstacle  # Initialize
@@ -277,10 +277,11 @@ class RRT:
                             goal_reached = True
                             break
 
-                    self.nodes[sample] = Node(sample, self.nodes[node].cost + distance)
+                    sample_node = Node(sample, self.nodes[node], self.nodes[node].cost + distance)
+                    self.nodes[sample] = sample_node
                     self.nodes[node].destination_list.append(sample)
                     # Adding the Edge
-                    self.edges[node, sample] = Link(node, sample, path, distance)
+                    self.edges[node, sample] = Link(node, sample_node, path, distance)
                     # Step 3.3. Check if the goal is reached
                     if goal_reached:
                         self.final_node = sample
@@ -289,7 +290,7 @@ class RRT:
 
     def plot_all(self, path='', close=False, show=True):
         self.map.plot(display=False)
-        self.plot(include_nodes=True)
+        self.plot(include_nodes=True, include_edges=True)
         self.car.obstacle.plot()
         if show:
             plt.show()
@@ -298,7 +299,7 @@ class RRT:
         if close:
             plt.close()
 
-    def plot(self, include_nodes=False):
+    def plot(self, include_nodes=False, include_edges=False):
         nodes = list(self.nodes.keys())
         edges = self.edges.copy()
         if (path := self.whole_path) is not None:
@@ -320,7 +321,28 @@ class RRT:
             plt.scatter(self.root[0], self.root[1], c='g')
             plt.scatter(self.goal[0], self.goal[1], c='r')
 
-        for _, val in edges.items():
-            if val.path:
-                path = np.array(val.path)
-                plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
+        if include_edges:
+            for _, val in edges.items():
+                if val.path:
+                    path = np.array(val.path)
+                    plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
+
+    def car_driving_gif(self, path: str, fps: int):
+        fig = plt.gcf()
+        moviewriter = PillowWriter(fps=fps)
+        with moviewriter.saving(fig, path, dpi=100):
+            edges = self.edges.copy()
+            path = self.whole_path
+            path_arr = np.array(path)
+            plt.scatter(path_arr[:, 0], path_arr[:, 1])
+            for inode, jnode in zip(path, path[1:]):
+                val = edges.pop((inode, jnode))
+                if val.path:
+                    path = np.array(val.path)
+                    for pos in path:
+                        self.car.position = pos
+                        plt.gcf().clear()
+                        self.map.plot(display=False)
+                        self.car.obstacle.plot()
+                        self.plot(include_edges=False)
+                        moviewriter.grab_frame()

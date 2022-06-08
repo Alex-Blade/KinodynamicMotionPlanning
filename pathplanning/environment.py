@@ -1,15 +1,14 @@
 import re
-from dataclasses import dataclass, field
-from operator import itemgetter
-from typing import Tuple, Union, Type, List
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from typing import Tuple, Union, Type, List
 
 import matplotlib.patches as pat
 import matplotlib.pyplot as plt
 import numpy as np
 import rtree
-import shapely.ops as ops
 import shapely.affinity as aff
+import shapely.ops as ops
 import json
 from shapely.geometry import Polygon, Point
 
@@ -80,17 +79,17 @@ class Obstacle:
             while y_min < y_max:
                 y_up = min(y_max, y_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_max, y_up)
-                if not pl.bounds:
+                if not (b := pl.bounds):
                     break
-                yield pl.bounds
+                yield b
                 y_min += self.cut_factor
         else:
             while x_min < x_max:
                 x_up = min(x_max, x_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_up, y_max)
-                if not pl.bounds:
+                if not (b := pl.bounds):
                     break
-                yield pl.bounds
+                yield b
                 x_min += self.cut_factor
 
     def plot(self):
@@ -98,6 +97,9 @@ class Obstacle:
         Add obstacle to the current plot.
         """
         # plt.gca().add_patch(pat.Polygon(self.points, color='black', fill=True))
+        plt.gca().add_patch(pat.Polygon([
+            *self.points
+        ], color='black', fill=False))
         for box in self.boxify():
             xmin, ymin, xmax, ymax = box
             plt.gca().add_patch(pat.Polygon([
@@ -260,8 +262,8 @@ class Map:
             obstacle.plot()
         plt.gca().set_xlim(0, self.map_limits[0])
         plt.gca().set_ylim(0, self.map_limits[1])
-        if display:
-            plt.show()
         if close:
             plt.close()
+
+
 
