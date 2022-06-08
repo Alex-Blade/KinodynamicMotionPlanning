@@ -1,15 +1,14 @@
 import re
-from dataclasses import dataclass, field
-from operator import itemgetter
-from typing import Tuple, Union, Type, List
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from typing import Tuple, Union, Type, List
 
 import matplotlib.patches as pat
 import matplotlib.pyplot as plt
 import numpy as np
 import rtree
-import shapely.ops as ops
 import shapely.affinity as aff
+import shapely.ops as ops
 from shapely.geometry import Polygon, Point
 
 from pathplanning.rrt_types import *
@@ -97,6 +96,9 @@ class Obstacle:
         Add obstacle to the current plot.
         """
         # plt.gca().add_patch(pat.Polygon(self.points, color='black', fill=True))
+        plt.gca().add_patch(pat.Polygon([
+            *self.points
+        ], color='black', fill=False))
         for box in self.boxify():
             xmin, ymin, xmax, ymax = box
             plt.gca().add_patch(pat.Polygon([
@@ -249,4 +251,6 @@ class Map:
         plt.gca().set_ylim(0, self.map_limits[1])
         if close:
             plt.close()
+
+
 
