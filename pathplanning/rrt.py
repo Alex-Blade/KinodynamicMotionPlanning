@@ -290,7 +290,7 @@ class RRT:
 
     def plot_all(self, path='', close=False, show=True):
         self.map.plot(display=False)
-        self.plot(include_nodes=True)
+        self.plot(include_nodes=True, include_edges=True)
         self.car.obstacle.plot()
         if show:
             plt.show()
@@ -299,7 +299,7 @@ class RRT:
         if close:
             plt.close()
 
-    def plot(self, include_nodes=False):
+    def plot(self, include_nodes=False, include_edges=False):
         nodes = list(self.nodes.keys())
         edges = self.edges.copy()
         if (path := self.whole_path) is not None:
@@ -321,7 +321,28 @@ class RRT:
             plt.scatter(self.root[0], self.root[1], c='g')
             plt.scatter(self.goal[0], self.goal[1], c='r')
 
-        for _, val in edges.items():
-            if val.path:
-                path = np.array(val.path)
-                plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
+        if include_edges:
+            for _, val in edges.items():
+                if val.path:
+                    path = np.array(val.path)
+                    plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
+
+    def car_driving_gif(self, path: str, fps: int):
+        fig = plt.gcf()
+        moviewriter = PillowWriter(fps=fps)
+        with moviewriter.saving(fig, path, dpi=100):
+            edges = self.edges.copy()
+            path = self.whole_path
+            path_arr = np.array(path)
+            plt.scatter(path_arr[:, 0], path_arr[:, 1])
+            for inode, jnode in zip(path, path[1:]):
+                val = edges.pop((inode, jnode))
+                if val.path:
+                    path = np.array(val.path)
+                    for pos in path:
+                        self.car.position = pos
+                        plt.gcf().clear()
+                        self.map.plot(display=False)
+                        self.car.obstacle.plot()
+                        self.plot(include_edges=False)
+                        moviewriter.grab_frame()
