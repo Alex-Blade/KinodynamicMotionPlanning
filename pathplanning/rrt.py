@@ -19,7 +19,7 @@ from collections import defaultdict
 from time import perf_counter
 
 
-@dataclass
+@dataclass(frozen=True)
 class Node:
     """
     Node of the RRT.
@@ -27,13 +27,11 @@ class Node:
     Attrs:
         position: Two-dimensional coordinates tuple
         cost: Cost to reach this node
-        destination_list: A list of other nodes that can be reached from the current
     """
 
     position: Position
     parent: Optional[Position]
     cost: Number
-    destination_list: List["Node"] = field(init=False, default_factory=list)
 
 
 @dataclass
@@ -147,9 +145,9 @@ class RRT:
         path = []
         node = self.nodes[self.final_node]
         while node.parent is not None:
-            path.append(node.position)
+            path.append(node)
             node = node.parent
-        path.append(node.position)
+        path.append(node)
         path.reverse()
         return path
 
@@ -279,9 +277,8 @@ class RRT:
 
                     sample_node = Node(sample, self.nodes[node], self.nodes[node].cost + distance)
                     self.nodes[sample] = sample_node
-                    self.nodes[node].destination_list.append(sample)
                     # Adding the Edge
-                    self.edges[node, sample] = Link(node, sample_node, path, distance)
+                    self.edges[self.nodes[node], sample_node] = Link(node, sample_node, path, distance)
                     # Step 3.3. Check if the goal is reached
                     if goal_reached:
                         self.final_node = sample
@@ -303,7 +300,7 @@ class RRT:
         nodes = list(self.nodes.keys())
         edges = self.edges.copy()
         if (path := self.whole_path) is not None:
-            path_arr = np.array(path)
+            path_arr = np.array([p.position for p in path])
             plt.scatter(path_arr[:, 0], path_arr[:, 1])
             nodes = np.array(list(filter(lambda n: n not in path, nodes)))
             for inode, jnode in zip(path, path[1:]):
