@@ -17,26 +17,29 @@ from copy import deepcopy
 from multiprocessing.pool import Pool
 
 
-ENV = Map.read_svg("/home/dimignatiev/documents/KinodynamicMotionPlanning/images/example3.svg")
+ENV = Map.read_json("/home/dimignatiev/documents/KinodynamicMotionPlanning/json_maps/example1.json")
 CAR = Car(4.42, 1.7, 5.12)
 
 
 GRID = {
-    "max_edge_len": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
-    "goal_rate": [0.1, 0.3, 0.5]
+    "max_edge_len": [3.0],
+    "goal_rate": [0.3],
+    "start_end_obstacles": [
+        [1, 23], [1, 41], [1, 29], [1, 5],
+        [9, 23], [9, 41], [9, 29], [9, 5],
+        [20, 23], [20, 41], [20, 29], [20, 5]
+    ]
 }
 
 
-def init(car):
+def init(car, start_end):
     env = deepcopy(ENV)
-    source = random.randint(0, len(env.obstacles) - 1)
-    start = env.obstacles.pop(source)
+    start = env.obstacles.pop(start_end[0])
     start = (*start.center,
              3.14 / 2 if start.bounding_box[2] - start.bounding_box[0] < start.bounding_box[3] - start.bounding_box[
                  1] else 0)
 
-    dest = random.randint(0, len(env.obstacles) - 1)
-    end = env.obstacles.pop(dest)
+    end = env.obstacles.pop(start_end[1])
     end = (*end.center,
            3.14 / 2 if end.bounding_box[2] - end.bounding_box[0] < end.bounding_box[3] - end.bounding_box[1] else 0)
     env.__post_init__()
@@ -48,20 +51,20 @@ def init(car):
 
 
 def run_testing(args):
-    goal_rate, max_edge_len, prefix, num_iter, thread_id = args
-    logging.info(f"Started R[{goal_rate}] M[{max_edge_len}] ID[{thread_id}]")
+    goal_rate, max_edge_len, prefix, num_iter, thread_id, start_end = args
+    logging.info(f"Started S[{start_end[0]}] E[{start_end[1]}] ID[{thread_id}]")
     car = deepcopy(CAR)
     df = pd.DataFrame(columns=["start_x", "start_y",
                                "end_x", "end_y",
                                "euclidian_distance",
                                "max_edge_len", "goal_rate",
-                               "finished", "iter_count", "final_distance"])
+                               "finished", "iter_count", "final_distance", "time"])
 
     local_planner = ReedsShepp(max_edge_len=max_edge_len, step_size=0.5, turning_radius=car.turning_radius)
     logger = logging.getLogger(thread_id)
     for _ in range(num_iter):
         logger.info(f"Iteration {_ + 1}/{num_iter}")
-        env, start, end = init(car)
+        env, start, end = init(car, start_end)
 
         euclidian_dist = ((end[0] - start[0])**2 + (end[1] - start[1])**2)**0.5
 
@@ -69,11 +72,14 @@ def run_testing(args):
 
         rrt = RRT(env, local_planner=local_planner, car=car, precision=(1, 1, 3.14))
         rrt.set_start(start)
+        t1 = time.perf_counter()
         result = rrt.run(end, num_iterations=2000, goal_rate=goal_rate, show_plots=False)
+        rrt.plot_all(path=f"{prefix}result_{num_iter}_{thread_id}_{_}.png", show=False)
+        t2 = time.perf_counter()
         if result is not None:
-            to_add.extend([True, result, rrt.whole_path_distance])
+            to_add.extend([True, result, rrt.whole_path_distance, t2-t1])
         else:
-            to_add.extend([False, np.NaN, np.NaN])
+            to_add.extend([False, np.NaN, np.NaN, t2-t1])
         to_add = pd.DataFrame(dict(zip(df.columns, to_add)), index=[0])
         df = pd.concat([df, to_add], ignore_index=True, axis=0)
 
@@ -86,22 +92,24 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     num = 6
-    attempts = 100
+    attempts = 1
     pool = Pool(num)
 
     all_args = []
 
     for rate in GRID["goal_rate"]:
         for max_edge_len in GRID["max_edge_len"]:
-            s_time = time.perf_counter()
-            prefix = f"results/R{rate}/M{max_edge_len}/"
-            os.makedirs(prefix, exist_ok=True)
-            arg1 = repeat(rate, num)
-            arg2 = repeat(max_edge_len, num)
-            arg3 = repeat(prefix, num)
-            arg4 = repeat(attempts, num)
-            arg5 = (''.join(random.choices(string.ascii_letters, k=num)) for _ in range(num))
-            all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4, arg5)])
+            for start_end in GRID["start_end_obstacles"]:
+                s_time = time.perf_counter()
+                prefix = f"results/S{start_end[0]}/E{start_end[1]}/"
+                os.makedirs(prefix, exist_ok=True)
+                arg1 = repeat(rate, num)
+                arg2 = repeat(max_edge_len, num)
+                arg3 = repeat(prefix, num)
+                arg4 = repeat(attempts, num)
+                arg5 = (''.join(random.choices(string.ascii_letters, k=num)) for _ in range(num))
+                arg6 = repeat(start_end, num)
+                all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4, arg5, arg6)])
 
     logging.info(f"There will be {len(all_args)} tests")
     pool.map(run_testing, all_args)

@@ -10,6 +10,7 @@ import numpy as np
 import rtree
 import shapely.ops as ops
 import shapely.affinity as aff
+import json
 from shapely.geometry import Polygon, Point
 
 from pathplanning.rrt_types import *
@@ -234,6 +235,18 @@ class Map:
                         obstacles.append(Obstacle(p.exterior.coords, _meta=o.get("id")))
         return cls((float(map_settings['height']) / 100, float(map_settings['width']) / 100), obstacles)
 
+    @classmethod
+    def read_json(cls, path: str) -> "Map":
+        with open(path) as file:
+            data = json.load(file)
+            obstacles = []
+            for i, o in enumerate(data['obstacles']):
+                p = Polygon(o['coordinates'])
+                if angle := o.get('angle'):
+                    p = aff.rotate(p, angle, use_radians=False)
+                obstacles.append(Obstacle(p.exterior.coords, _meta=str(i)))
+            return cls((float(data['height']), float(data['width'])), obstacles)
+
     def plot(self, close=False, display=True):
         """
         Create a figure and plot the map with obstacles on it.
@@ -247,6 +260,8 @@ class Map:
             obstacle.plot()
         plt.gca().set_xlim(0, self.map_limits[0])
         plt.gca().set_ylim(0, self.map_limits[1])
+        if display:
+            plt.show()
         if close:
             plt.close()
 
