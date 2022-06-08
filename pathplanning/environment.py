@@ -79,17 +79,17 @@ class Obstacle:
             while y_min < y_max:
                 y_up = min(y_max, y_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_max, y_up)
-                if not pl.bounds:
+                if not (b := pl.bounds):
                     break
-                yield pl.bounds
+                yield b
                 y_min += self.cut_factor
         else:
             while x_min < x_max:
                 x_up = min(x_max, x_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_up, y_max)
-                if not pl.bounds:
+                if not (b := pl.bounds):
                     break
-                yield pl.bounds
+                yield b
                 x_min += self.cut_factor
 
     def plot(self):
