@@ -1,14 +1,14 @@
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple, Optional, Any
 import random
-from itertools import chain
 
 import dubins
 import reeds_shepp
 import matplotlib.animation
 import matplotlib.pyplot as plt
 from matplotlib.animation import PillowWriter
+import rtree
 import networkx as nx
 import numpy as np
 
@@ -30,26 +30,9 @@ class Node:
     """
 
     position: Position
-    parent: Optional[Position]
-    cost: Number
-
-
-@dataclass
-class Link:
-    """
-    Edge of the RRT.
-
-    Attrs:
-        source: The "from" node of the Link
-        dest: The "to" node of the Link
-        path: A list of coordinates to follow
-        cost: Cost to follow the path
-    """
-
-    source: Node
-    dest: Node
-    path: List[Position]
-    cost: Number
+    parent: Optional["Node"]
+    distance: Number
+    path: Optional[Tuple[Position]]
 
 
 class SteeringFunction:
@@ -128,8 +111,8 @@ class RRT:
                  car: Car,
                  local_planner: SteeringFunction,
                  precision=(5, 5, 1)):
-        self.nodes = {}
-        self.edges = {}
+        self.nodes: List[Node] = []
+        self.tree = rtree.Index()
         self.map = _map
         self.car = car
         self.local_planner = local_planner
@@ -143,27 +126,17 @@ class RRT:
         if self.final_node is None:
             return None
         path = []
-        node = self.nodes[self.final_node]
+        node = self.final_node
         while node.parent is not None:
             path.append(node)
             node = node.parent
-        path.append(node)
         path.reverse()
         return path
 
     @property
     def whole_path_distance(self):
         path = self.whole_path
-        edges = self.edges.copy()
-        s = 0
-        for inode, jnode in zip(path, path[1:]):
-            val = edges.pop((inode, jnode))
-            if val.path:
-                arr = np.array(val.path)
-                points = arr[:, 0:2]
-                d = np.diff(points, axis=0)
-                s += np.sum(np.hypot(d[:, 0], d[:, 1]))
-        return s
+        return sum(p.distance for p in path)
 
     def set_start(self, start: Position):
         """
@@ -172,14 +145,16 @@ class RRT:
         Args:
             start: Coordinates of the new start point
         """
-        self.nodes = {}
-        self.edges = {}
-        self.nodes[start] = Node(start, None, 0)
+        self.nodes = []
+        n = Node(start, None, 0, None)
+        self.nodes.append(n)
         self.root = start
+        self.tree = rtree.Index()
+        self.tree.add(id(n), start[:2], obj=n)
         self.car.position = start
         _ = self.car.obstacle  # Initialize
 
-    def select_options(self, sample: Position, max_options: int) -> List[Tuple[Position, LenPath]]:
+    def select_options(self, sample: Position, max_options: int) -> List[Tuple[Node, LenPath]]:
         """
         Find `max_options` existing Nodes that are the closest to the `sample`.
         Distance to the Node is calculated on Dubins curves.
@@ -191,10 +166,9 @@ class RRT:
             A list of tuples that contain Nodes' coordinates and unsampled Dubins paths to them.
         """
         options = []
-        for node in self.nodes:
-            options.extend([(node, self.local_planner.get_shortest_path(node, sample))])
+        node = random.choice([i for i in self.tree.nearest(sample[:2], max_options, objects="raw")])
+        options.extend([(node, self.local_planner.get_shortest_path(node.position, sample))])
         options.sort(key=lambda x: x[1][0])
-        options = options[:max_options]
         return options
 
     def in_goal_region(self, sample: Position) -> bool:
@@ -206,10 +180,11 @@ class RRT:
         Returns:
             True if it is, False otherwise
         """
-        for i, value in enumerate(sample):
-            if abs(self.goal[i]-value) > self.precision[i]:
-                return False
-        return True
+        x, y, th = sample
+        return (abs(self.goal[0] - x) <= self.precision[0]) &\
+               (abs(self.goal[1] - y) <= self.precision[1]) &\
+               (abs(self.goal[2] - th) <= self.precision[2])
+
 
     def run_animated(self, path: str, goal: Position, num_iterations=100, goal_rate=.1, fps: int = 5, show_plots: bool = False):
         fig = plt.gcf()
@@ -244,9 +219,9 @@ class RRT:
             else:
                 sample = self.map.random_free_point()
 
-            # Step 2. Find closest points to the sampled
-            options = [random.choice(self.select_options(sample, 10))]
-            # Step 3. Among closest find one with a better path
+            # Step 2. Find the closest points to the sampled
+            options = self.select_options(sample, 3)
+            # Step 3. Among the closest find one with a better path
 
             # Note, we do not consider all neighbors, meaning that we could be losing good samples
             for node, (distance, dpath) in options:
@@ -263,11 +238,10 @@ class RRT:
                     if not free:
                         break
                 else:
-                    # Step 3.2. Add the node to the graph if there's a path
-                    if show_plots:
-                        if _ % 10 == 0:
-                            self.plot_all(show=True, close=False)
                     goal_reached = False
+                    if show_plots:
+                        if _ % 50 == 0:
+                            self.plot_all(show=True, close=False)
                     for idx, point in enumerate(path):
                         if self.in_goal_region(point):
                             sample = point
@@ -275,13 +249,12 @@ class RRT:
                             goal_reached = True
                             break
 
-                    sample_node = Node(sample, self.nodes[node], self.nodes[node].cost + distance)
-                    self.nodes[sample] = sample_node
-                    # Adding the Edge
-                    self.edges[self.nodes[node], sample_node] = Link(node, sample_node, path, distance)
+                    sample_node = Node(sample, node, distance, tuple(path))
+                    self.nodes.append(sample_node)
+                    self.tree.add(id(sample_node), sample[:2], obj=sample_node)
                     # Step 3.3. Check if the goal is reached
                     if goal_reached:
-                        self.final_node = sample
+                        self.final_node = sample_node
                         return _
                     break
 
@@ -297,45 +270,35 @@ class RRT:
             plt.close()
 
     def plot(self, include_nodes=False, include_edges=False):
-        nodes = list(self.nodes.keys())
-        edges = self.edges.copy()
+        nodes = self.nodes
         if (path := self.whole_path) is not None:
-            path_arr = np.array([p.position for p in path])
-            plt.scatter(path_arr[:, 0], path_arr[:, 1])
+            path_arr = np.array([item for sublist in [p.path for p in path] for item in sublist])
+            path_arr = np.array([(i[0], i[1]) for i in path_arr])
             nodes = np.array(list(filter(lambda n: n not in path, nodes)))
-            for inode, jnode in zip(path, path[1:]):
-                val = edges.pop((inode, jnode))
-                if val.path:
-                    path = np.array(val.path)
-                    plt.plot(path[:, 0], path[:, 1], 'g')
+            plt.gca().plot(path_arr[:, 0], path_arr[:, 1], "g")
 
         if include_nodes and self.nodes:
-            if len(nodes) > 1:
-                try:
-                    plt.scatter(nodes[:, 0], nodes[:, 1], alpha=0.3, c='gray', s=15)
-                except TypeError:
-                    pass
-            plt.scatter(self.root[0], self.root[1], c='g')
-            plt.scatter(self.goal[0], self.goal[1], c='r')
+            nodes_positions = np.array([n.position for n in nodes])
+            if len(nodes_positions) > 1:
+                plt.gca().scatter(nodes_positions[:, 0], nodes_positions[:, 1], alpha=0.3, c='gray', s=15)
+            plt.gca().scatter(self.root[0], self.root[1], c='g')
+            plt.gca().scatter(self.goal[0], self.goal[1], c='r')
 
         if include_edges:
-            for _, val in edges.items():
-                if val.path:
-                    path = np.array(val.path)
-                    plt.plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
+            for node in nodes:
+                if node.path:
+                    path = np.array(node.path)
+                    plt.gca().plot(path[:, 0], path[:, 1], 'gray', alpha=0.3)
 
     def car_driving_gif(self, path: str, fps: int):
+        if not self.whole_path:
+            raise ValueError("No path was found")
         fig = plt.gcf()
         moviewriter = PillowWriter(fps=fps)
         with moviewriter.saving(fig, path, dpi=100):
-            edges = self.edges.copy()
-            path = self.whole_path
-            path_arr = np.array([p.position for p in path])
-            plt.scatter(path_arr[:, 0], path_arr[:, 1])
-            for inode, jnode in zip(path, path[1:]):
-                val = edges.pop((inode, jnode))
-                if val.path:
-                    path = np.array(val.path)
+            for node in self.whole_path:
+                if node.path:
+                    path = np.array(node.path)
                     for pos in path:
                         self.car.position = pos
                         plt.gcf().clear()

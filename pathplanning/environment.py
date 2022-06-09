@@ -222,7 +222,7 @@ class Map:
         x, y = np.random.rand() * self.map_limits[0], np.random.rand() * self.map_limits[1]
         while not self.is_free(x, y):
             x, y = np.random.rand() * self.map_limits[0], np.random.rand() * self.map_limits[1]
-        return x, y, np.random.rand() * np.pi * 2
+        return x, y, np.deg2rad(np.random.randint(0, 360))
 
     @classmethod
     def read_svg(cls, path: str) -> "Map":
