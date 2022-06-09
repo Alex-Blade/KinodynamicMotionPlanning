@@ -139,7 +139,7 @@ class RRT:
         self.final_node: Optional[Node] = None
 
     @property
-    def whole_path(self) -> Optional[List[Position]]:
+    def whole_path(self) -> Optional[List[Node]]:
         if self.final_node is None:
             return None
         path = []
@@ -330,7 +330,7 @@ class RRT:
         with moviewriter.saving(fig, path, dpi=100):
             edges = self.edges.copy()
             path = self.whole_path
-            path_arr = np.array(path)
+            path_arr = np.array([p.position for p in path])
             plt.scatter(path_arr[:, 0], path_arr[:, 1])
             for inode, jnode in zip(path, path[1:]):
                 val = edges.pop((inode, jnode))
@@ -342,4 +342,6 @@ class RRT:
                         self.map.plot(display=False)
                         self.car.obstacle.plot()
                         self.plot(include_edges=False)
+                        plt.gca().scatter(self.root[0], self.root[1], c='g')
+                        plt.gca().scatter(self.goal[0], self.goal[1], c='r')
                         moviewriter.grab_frame()

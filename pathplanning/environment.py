@@ -264,6 +264,3 @@ class Map:
         plt.gca().set_ylim(0, self.map_limits[1])
         if close:
             plt.close()
-
-
-
