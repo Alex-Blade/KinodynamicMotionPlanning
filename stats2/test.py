@@ -11,6 +11,7 @@ import string
 import numpy as np
 import pandas as pd
 import time
+import cProfile, pstats
 from copy import deepcopy
 
 
@@ -62,6 +63,7 @@ def run_testing(args):
 
     local_planner = ReedsShepp(max_edge_len=max_edge_len, step_size=0.5, turning_radius=car.turning_radius)
     logger = logging.getLogger(thread_id)
+    os.makedirs(f'{prefix}result_{num_iter}_{thread_id}', exist_ok=True)
     for _ in range(num_iter):
         logger.info(f"Iteration {_ + 1}/{num_iter}")
         env, start, end = init(car, start_end)
@@ -73,8 +75,13 @@ def run_testing(args):
         rrt = RRT(env, local_planner=local_planner, car=car, precision=(1, 1, 3.14))
         rrt.set_start(start)
         t1 = time.perf_counter()
+        profiler = cProfile.Profile()
+        profiler.enable()
         result = rrt.run(end, num_iterations=2000, goal_rate=goal_rate, show_plots=False)
-        rrt.plot_all(path=f"{prefix}result_{num_iter}_{thread_id}_{_}.png", show=False)
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumtime')
+        stats.dump_stats(f"{prefix}result_{num_iter}_{thread_id}/{_}")
+        rrt.plot_all(path=f"{prefix}result_{num_iter}_{thread_id}/{_}.png", show=False)
         t2 = time.perf_counter()
         if result is not None:
             to_add.extend([True, result, rrt.whole_path_distance, t2-t1])
@@ -91,8 +98,8 @@ def main():
     random.seed(42)
     logging.basicConfig(level=logging.INFO)
 
-    num = 6
-    attempts = 1
+    num = 2
+    attempts = 50
     pool = Pool(num)
 
     all_args = []
