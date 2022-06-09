@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import rtree
 import shapely.affinity as aff
+import shapely.geometry.multipolygon
 import shapely.ops as ops
 import json
 from shapely.geometry import Polygon, Point
@@ -79,17 +80,23 @@ class Obstacle:
             while y_min < y_max:
                 y_up = min(y_max, y_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_max, y_up)
-                if not (b := pl.bounds):
-                    break
-                yield b
+                if isinstance(pl, shapely.geometry.multipolygon.MultiPolygon):
+                    yield from (g.bounds for g in pl.geoms)
+                else:
+                    if not (b := pl.bounds):
+                        break
+                    yield b
                 y_min += self.cut_factor
         else:
             while x_min < x_max:
                 x_up = min(x_max, x_min + self.cut_factor)
                 pl = ops.clip_by_rect(self.polygon, x_min, y_min, x_up, y_max)
-                if not (b := pl.bounds):
-                    break
-                yield b
+                if isinstance(pl, shapely.geometry.multipolygon.MultiPolygon):
+                    yield from (g.bounds for g in pl.geoms)
+                else:
+                    if not (b := pl.bounds):
+                        break
+                    yield b
                 x_min += self.cut_factor
 
     def plot(self):
