@@ -193,7 +193,7 @@ class RRT:
             self.run(goal, num_iterations=num_iterations, goal_rate=goal_rate, show_plots=show_plots, moviewriter=moviewriter)
         return
 
-    def run(self, goal, num_iterations=100, goal_rate=.1,
+    def run(self, goal, num_iterations=100, goal_rate=.1, sample_options: int = 3,
             show_plots: bool = None,
             moviewriter: matplotlib.animation.MovieWriter = None):
         """
@@ -203,6 +203,9 @@ class RRT:
             goal: Coordinates and angle of the destination
             num_iterations: Maximum available iterations
             goal_rate: The probability to expand towards the goal
+            sample_options: Nearest Neighbors randomization factor
+            show_plots: Show plots every 10 seconds
+            moviewriter: For animations
 
         Note:
             Instead of a result, the algorithm will set `final_node` if the path exists
@@ -220,7 +223,7 @@ class RRT:
                 sample = self.map.random_free_point()
 
             # Step 2. Find the closest points to the sampled
-            options = self.select_options(sample, 3)
+            options = self.select_options(sample, sample_options)
             # Step 3. Among the closest find one with a better path
 
             # Note, we do not consider all neighbors, meaning that we could be losing good samples
