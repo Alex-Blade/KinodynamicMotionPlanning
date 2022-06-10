@@ -124,6 +124,7 @@ class Car:
     turning_radius: Number
     _position: Union[Position, None] = field(init=False)
     _obstacle: Union[Obstacle, None] = field(init=False)
+    points: List[Position] = None
 
     def __post_init__(self):
         self._position = None
@@ -145,10 +146,15 @@ class Car:
         if self._obstacle:
             return self._obstacle
 
-        polygon = Polygon(((self.position[0] - self.x_size / 2, self._position[1] - self.y_size / 2),
-                           (self.position[0] - self.x_size / 2, self._position[1] + self.y_size / 2),
-                           (self.position[0] + self.x_size / 2, self._position[1] + self.y_size / 2),
-                           (self.position[0] + self.x_size / 2, self._position[1] - self.y_size / 2)))
+        if self.points:
+            polygon = Polygon(self.points)
+            poly_pos: Point = polygon.representative_point()
+            polygon = aff.translate(polygon, self.position[0] - poly_pos.x, self.position[1] - poly_pos.y)
+        else:
+            polygon = Polygon(((self.position[0] - self.x_size / 2, self._position[1] - self.y_size / 2),
+                               (self.position[0] - self.x_size / 2, self._position[1] + self.y_size / 2),
+                               (self.position[0] + self.x_size / 2, self._position[1] + self.y_size / 2),
+                               (self.position[0] + self.x_size / 2, self._position[1] - self.y_size / 2)))
         polygon: Polygon = aff.rotate(polygon, self._position[2], use_radians=True)
         points = [p for p in polygon.exterior.coords]
         self._obstacle = Obstacle(points, cut_factor=0.25)
