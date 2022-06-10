@@ -45,8 +45,8 @@
  
 \setmainfont[SizeFeatures={Size=14}]{Times New Roman}
 \numberwithin{equation}{section}
-\numberwithin{algorithm}{subsection}
-\counterwithin{figure}{subsection}
+\numberwithin{algorithm}{section}
+\counterwithin{figure}{section}
 
 \title{Kinodynamic Motion Planning}
 \author{}
@@ -101,49 +101,26 @@ The algorithm is created with holonomic - the robot can only travel in $\mathcal
 
 Finally, the starting points are defined as $q_i\in\mathcal{C}_{free}$ and the goal point is $q_g\in\mathcal{C}_{free}$. The local planner should produce a path, which is a set of connected linearized curves that were provided by the steering function.
 
-Generally, industry solves such problem with either a "sampling" algorithm (RRT and variants, PRM) or a graph traversal algorithm like A*. Right now RRT-like algorithms are used more as with a proper set of improvements they can converge quite fast. The data on obstacles is often stored as points in KD-Tree and the collision detection is performed by querying it. Nonholonomic constraints are usually left to the reactive planner. There are several
+Generally, industry solves such problem with either a "sampling" algorithm (RRT and variants, PRM) or a graph traversal algorithm like A*. Right now RRT-like algorithms are used more as with a proper set of improvements they can converge quite fast. Classical implementation comes with two parameters - iterations limit $K$ and maximum edge length $\Delta{t}$. The data on obstacles is often stored as points in KD-Tree and the collision detection is performed by querying it. Nonholonomic constraints are usually left to the reactive planner. There are several
 drawbacks related to those approaches. Firstly, the use of KD-Tree implies a complexity increase on tree expansion, as KD-Tree is not meant to be updated. Secondly, collision detection in such cases is often done by checking the area of some radius around the robot, which makes it impossible for a planner to create a path through narrow corridors, or by checking its bounding box, which is inefficient for any shape except for rectangles that are aligned to the axes (which is not true for any rotated rectangle). And finally, lack of nonholonomic constraints might make the whole path unreachable. The aim of the presented algorithm is not to suffer from those issues with as little overhead compared to others as possible.
-This is achieved with the help of R*-Tree, special polygon approximation technique, goal-biased sampling and nearest neighbor randomization.
+This is achieved with the help of R-Tree, special polygon approximation technique, goal-biased sampling and nearest neighbor randomization.
 
 \section{Literature Overview}
 
-All previous conclusions about "the industry" were obtained by analysing recent researches published under IEEE, ICRA, IROS and other robotics-related conferences.
+All previous conclusions about "the industry" were obtained by analysing recent researches published at ICRA, IROS, IEEE and other robotics-related conferences.
 
 \section{The Proposed Method}
 Our method is based on the RRT algorithm and essentially is an extension for it. The difference from other works lies in data structures,
 point sampling approach and collision detection.
 
-\subsection{Sampling}
-
-By default, RRT algorithm picks a random point $q\in\mathcal{C}_{free}$ and tries to build a trajectory from the nearest point in the tree to it (at the first iteration the
-nearest point is set to be $q_i$).
-The way to determine that the point is reachable is usually constructing a straight line between the sample point and the existing one.
-Then, if trajectory is built, the point is added the tree.
-
-A common enhancement to this process is goal-biased sampling. In this case, with a parameterized probability instead of choosing a random point in $C_{free}$. This approach, however,
-has a flaw. If the tree has grown close to the $q_g$ with only one branch with last node $q_1$ and due to nonholomonic constraints cannot reach the $q_g$, all later samples that
-were changed on $q_g$ will get trapped by $q_1$, which has minimal distance to the $q_g$, until a new point $q_2: dist(q_2, q_g) < dist(q_1, q_g)$ is added to the tree.
-In order to increase the chances of "untrapping" the $q_g$, we propose the following: since after sampling a point or choosing the $q_g$ as the sample point the algorithm tries to 
-find the nearest nodes already added to the tree, one could select a random node from the set of n-closest nodes without any computational drawback.
-
-\begin{figure}[H]
-\begin{center}
-\includegraphics[scale=0.7]{images/car_trapped.png}
-\captionsetup{width=0.6\textwidth}
-\caption{An example of a vehicle nonholonomically trapped due to angular precision. It stands at the finish point in the wrong direction. RRT with goal sampling will fail to find a trajectory at each $q_g$ check.}
-\end{center}
-\end{figure}
-
-Additionally, instead of computing Euclidean distances to all nodes, our algorithm will query the R-Tree on the closest neighbors and compute the Reeds-Shepp distance to them. 
-
-\subsection{Tree and obstacles in R-Tree}
+\subsection{Tree and Obstacles in R-Tree}
 
 As the data structure for the tree points we propose R-Tree, which does not always require full tree rebuild for an insertion.
 While R-Tree does not drastically differ in complexity terms from a KD-Tree, it has an advantage of being able to store not just vertices,
 but spatial data in forms of rectangles.
 
 Some works proposed the use of R-Trees as a structure for obstacles as well. However, in shaped that is not a rectangle and not perfectly aligned to the axes requires significantly
-more $\mathcal{C}_{free}$ space than it actually should (Fig. 4.2.1a). Since it can drastically decrease performance of the algorithm at turns, we are proposing an algorithm for
+more $\mathcal{C}_{free}$ space than it actually should (Fig. 4.1.a). Since it can drastically decrease performance of the algorithm at turns, we are proposing an algorithm for
 approximation of polygons to a set of axes-aligned rectangles. This kind of approximation of both obstacles and the car allows to store everything in the R-Tree. However, it would be more beneficial to store it in a differently configured R-Tree,
 as density and amount of data points is incomparable to those in the RRT nodes tree.
 
@@ -193,5 +170,74 @@ The function RectangleClip tries to find an intersection between the obstacle an
     \captionsetup{width=0.6\textwidth}
     \caption{An example of inefficient collision check with bounding boxes compared to the proposed function with different parameter.}
 \end{figure}
+
+\subsection{Sampling}
+
+By default, RRT algorithm picks a random point $q\in\mathcal{C}_{free}$ and tries to build a trajectory from the nearest point in the tree to it (at the first iteration the
+nearest point is set to be $q_i$).
+The way to determine that the point is reachable is usually constructing a straight line between the sample point and the existing one.
+Then, if trajectory is built, the point is added the tree.
+
+A common enhancement to this process is goal-biased sampling. In this case, with a parameterized probability $g_r$ instead of choosing a random point in $C_{free}$. This approach, however,
+has a flaw. If the tree has grown close to the $q_g$ with only one branch with last node $q_1$ and due to nonholomonic constraints cannot reach the $q_g$, all later samples that
+were changed on $q_g$ will get trapped by $q_1$, which has minimal distance to the $q_g$, until a new point $q_2: dist(q_2, q_g) < dist(q_1, q_g)$ is added to the tree.
+In order to increase the chances of "untrapping" the $q_g$, we propose the following: since after sampling a point or choosing the $q_g$ as the sample point the algorithm tries to 
+find the nearest nodes already added to the tree, one could select a random node from the set of $n$-closest nodes without any computational drawback.
+
+\begin{figure}[H]
+\begin{center}
+\includegraphics[scale=0.7]{images/car_trapped.png}
+\captionsetup{width=0.6\textwidth}
+\caption{An example of a vehicle nonholonomically trapped due to angular precision. It stands at the finish point in the wrong direction. RRT with goal sampling will fail to find a trajectory at each $q_g$ check.}
+\end{center}
+\end{figure}
+
+Additionally, instead of computing Euclidean distances to all nodes, our algorithm queries the R-Tree on the closest neighbors and computes the Reeds-Shepp distance to them.
+The final step of the sampling process involves checking feasibility of the provided trajectory.
+For each point $q$ provided by the trajectory generator (steering function) the algorithm performs $Boxify(\mathcal{A}(q), p)$.
+Other researches proposed converting $\mathcal{O}$ into TP-Space (Trajectory Parameter-Space), which would represent an intersection of $\mathcal{C}_{free}$ and 
+kinodynamically feasible trajectories available in $\mathcal{A}(q)$. However, this would strongly increase the dimension of the $\mathcal{C}_{free}$ and would require
+storing nodes in the same dimension, which then would lead to higher complexity in the nearest neighbor queries on the RRT tree data structure.
+In our implementation $\mathcal{C}_{free}$ stays in $SE(2)$ and the maximum number of collision checks $\mathcal{O}_{checks}$ depends on the amount of iterations $k$, RRT maximum edge length $\Delta{t}$, chosen shape approximation discretization factor $p$ and trajectory discretization factor $\delta$.
+\[
+\mathcal{O}_{checks} \leq k\cdot p\cdot \frac{\Delta{t}}{\delta}
+\]
+
+\begin{algorithm}[H]
+    \caption{Complete}
+    \begin{algorithmic}[1]
+    \State Constants: R-Tree with obstacles $rt_{obs}$
+    \State Environment and Car Inputs: $\mathcal{C}$, $q_i$, $q_g$, $precision$, $\mathcal{A}$
+    \State Parameters Inputs: $\Delta{t}$, $K$, $g_r$, $p$, $\delta$, $n$
+    \State $rt_{tree}$ = R-Tree$(g_i)$
+    \For {$k$ in $1..K$}
+        \If {$random(0, 1) > (1 - g_)$}
+            \State $q_s$ = $q_g$
+        \Else
+            \State $q_s$ = $q_{rand}\in\mathcal{C}_{free}$
+        \EndIf
+        \State $nodes$ = NNQuery$(rt_{tree}, q_s, n)$
+        \State $q_n$ = RandomChoice($nodes$)
+        \State $path$ = Reeds-Shepp($q_n$, $q_s$)
+        \For {$q$ in $path$}
+            $boxes$ = Boxify$(\mathcal{A}(q))$
+            \For {$box$ in $boxes$}
+                \If {IntersectionQuery$(rt_{obs}, box) > 0$}
+                    \State continue
+                \EndIf
+            \EndFor
+        \EndFor
+
+        \If {InGoalRegion$(q_n, q_g, precision)$}
+            \State return $\text{Node}_s$
+        \EndIf        
+
+        \State $\text{Node}_n$ = GetNode$(q_n)$
+        \State $\text{Node}_s$ = Node$\{position=q_s, root=\text{Node}_n, path=path\}$
+        \State Add$(rt_{tree}, \text{Node}_s)$
+    \EndFor
+    \State return "Not enough iterations"
+    \end{algorithmic}
+\end{algorithm}
 
 \end{document}
