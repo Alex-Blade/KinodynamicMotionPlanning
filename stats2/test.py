@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import time
 import cProfile, pstats
+import matplotlib.pyplot as plt
 from copy import deepcopy
 
 
@@ -28,8 +29,9 @@ GRID = {
     "start_end_obstacles": [
         [1, 23], [1, 41], [1, 29], [1, 5],
         [9, 23], [9, 41], [9, 29], [9, 5],
-        [20, 23], [20, 41], [20, 29], [20, 5]
-    ]
+        [19, 23], [19, 41], [19, 29], [19, 5]
+    ],
+    "sample_options": [1, 3, 6, 10]
 }
 
 
@@ -52,7 +54,7 @@ def init(car, start_end):
 
 
 def run_testing(args):
-    goal_rate, max_edge_len, prefix, num_iter, thread_id, start_end = args
+    goal_rate, max_edge_len, prefix, num_iter, thread_id, start_end, sample_options = args
     logging.info(f"Started S[{start_end[0]}] E[{start_end[1]}] ID[{thread_id}]")
     car = deepcopy(CAR)
     df = pd.DataFrame(columns=["start_x", "start_y",
@@ -77,11 +79,12 @@ def run_testing(args):
         t1 = time.perf_counter()
         profiler = cProfile.Profile()
         profiler.enable()
-        result = rrt.run(end, num_iterations=2000, goal_rate=goal_rate, show_plots=False)
+        result = rrt.run(end, num_iterations=2000, goal_rate=goal_rate, show_plots=False, sample_options=sample_options)
         profiler.disable()
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.dump_stats(f"{prefix}result_{num_iter}_{thread_id}/{_}")
         rrt.plot_all(path=f"{prefix}result_{num_iter}_{thread_id}/{_}.png", show=False)
+        plt.gca().clear()
         t2 = time.perf_counter()
         if result is not None:
             to_add.extend([True, result, rrt.whole_path_distance, t2-t1])
@@ -98,8 +101,8 @@ def main():
     random.seed(42)
     logging.basicConfig(level=logging.INFO)
 
-    num = 2
-    attempts = 50
+    num = 1
+    attempts = 1
     pool = Pool(num)
 
     all_args = []
@@ -107,16 +110,18 @@ def main():
     for rate in GRID["goal_rate"]:
         for max_edge_len in GRID["max_edge_len"]:
             for start_end in GRID["start_end_obstacles"]:
-                s_time = time.perf_counter()
-                prefix = f"results/S{start_end[0]}/E{start_end[1]}/"
-                os.makedirs(prefix, exist_ok=True)
-                arg1 = repeat(rate, num)
-                arg2 = repeat(max_edge_len, num)
-                arg3 = repeat(prefix, num)
-                arg4 = repeat(attempts, num)
-                arg5 = (''.join(random.choices(string.ascii_letters, k=num)) for _ in range(num))
-                arg6 = repeat(start_end, num)
-                all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4, arg5, arg6)])
+                for sample_options in GRID["sample_options"]:
+                    s_time = time.perf_counter()
+                    prefix = f"results/S{start_end[0]}/E{start_end[1]}/SO{sample_options}/"
+                    os.makedirs(prefix, exist_ok=True)
+                    arg1 = repeat(rate, num)
+                    arg2 = repeat(max_edge_len, num)
+                    arg3 = repeat(prefix, num)
+                    arg4 = repeat(attempts, num)
+                    arg5 = (''.join(random.choices(string.ascii_letters, k=num)) for _ in range(num))
+                    arg6 = repeat(start_end, num)
+                    arg7 = repeat(sample_options, num)
+                    all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4, arg5, arg6, arg7)])
 
     logging.info(f"There will be {len(all_args)} tests")
     pool.map(run_testing, all_args)
