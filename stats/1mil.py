@@ -1,6 +1,7 @@
 import logging
 import os
-from itertools import repeat
+import glob
+from itertools import repeat, product
 
 
 from pathplanning.environment import Map, Car
@@ -17,13 +18,14 @@ from copy import deepcopy
 from multiprocessing.pool import Pool
 
 
-ENV = Map.read_svg("/home/dimignatiev/documents/KinodynamicMotionPlanning/images/example3.svg")
+ENV = Map.read_svg("../images/example3.svg")
 CAR = Car(4.42, 1.7, 5.12)
 
 
 GRID = {
     "max_edge_len": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
-    "goal_rate": [0.1, 0.3, 0.5]
+    "goal_rate": [0.1, 0.3, 0.5],
+    "sample_options": [1, 3, 6, 10]
 }
 
 
@@ -48,16 +50,19 @@ def init(car):
 
 
 def run_testing(args):
-    goal_rate, max_edge_len, prefix, num_iter, thread_id = args
-    logging.info(f"Started R[{goal_rate}] M[{max_edge_len}] ID[{thread_id}]")
+    dct, prefix, num_iter, thread_id = args
+    dct = dct.copy()
+    cols = list(dct.keys())
+    vals = list(dct.values())
+    logging.info(f"Started {dct} ID[{thread_id}]")
     car = deepcopy(CAR)
     df = pd.DataFrame(columns=["start_x", "start_y",
                                "end_x", "end_y",
                                "euclidian_distance",
-                               "max_edge_len", "goal_rate",
+                               *cols,
                                "finished", "iter_count", "final_distance"])
 
-    local_planner = ReedsShepp(max_edge_len=max_edge_len, step_size=0.5, turning_radius=car.turning_radius)
+    local_planner = ReedsShepp(max_edge_len=dct.pop("max_edge_len"), step_size=0.5, turning_radius=car.turning_radius)
     logger = logging.getLogger(thread_id)
     for _ in range(num_iter):
         logger.info(f"Iteration {_ + 1}/{num_iter}")
@@ -65,11 +70,11 @@ def run_testing(args):
 
         euclidian_dist = ((end[0] - start[0])**2 + (end[1] - start[1])**2)**0.5
 
-        to_add = [start[0], start[1], end[0], end[1], euclidian_dist, max_edge_len, goal_rate]
+        to_add = [start[0], start[1], end[0], end[1], euclidian_dist] + vals
 
         rrt = RRT(env, local_planner=local_planner, car=car, precision=(1, 1, 3.14))
         rrt.set_start(start)
-        result = rrt.run(end, num_iterations=2000, goal_rate=goal_rate, show_plots=False)
+        result = rrt.run(end, num_iterations=2000, show_plots=False, **dct)
         if result is not None:
             to_add.extend([True, result, rrt.whole_path_distance])
         else:
@@ -91,17 +96,29 @@ def main():
 
     all_args = []
 
-    for rate in GRID["goal_rate"]:
-        for max_edge_len in GRID["max_edge_len"]:
-            s_time = time.perf_counter()
-            prefix = f"results/R{rate}/M{max_edge_len}/"
-            os.makedirs(prefix, exist_ok=True)
-            arg1 = repeat(rate, num)
-            arg2 = repeat(max_edge_len, num)
-            arg3 = repeat(prefix, num)
-            arg4 = repeat(attempts, num)
-            arg5 = (''.join(random.choices(string.ascii_letters, k=num)) for _ in range(num))
-            all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4, arg5)])
+    keys = GRID.keys()
+    for t in product(*GRID.values()):
+        dct = {}
+        pref = ""
+        for i, k in enumerate(keys):
+            dct[k] = t[i]
+            pref += f"/{k}_{t[i]}"
+        s_time = time.perf_counter()
+        prefix = f"results_rtree{pref}/"
+        _num = num
+        if _ := len(glob.glob(f"{prefix}*.csv")):
+            logging.info(f"Ignoring some values: {t}")
+            _num -= _
+
+        if not _num:
+            continue
+
+        os.makedirs(prefix, exist_ok=True)
+        arg1 = repeat(dct, _num)
+        arg2 = repeat(prefix, _num)
+        arg3 = repeat(attempts, _num)
+        arg4 = (''.join(random.choices(string.ascii_letters, k=_num)) for _ in range(_num))
+        all_args.extend([_ for _ in zip(arg1, arg2, arg3, arg4)])
 
     logging.info(f"There will be {len(all_args)} tests")
     pool.map(run_testing, all_args)
