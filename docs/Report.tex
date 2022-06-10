@@ -1,4 +1,4 @@
-\documentclass[12pt]{article}
+\documentclass[a4paper,12pt]{article}
 
 \usepackage[utf8]{inputenc}
 \usepackage{newunicodechar}
@@ -13,11 +13,12 @@
 \usepackage{cancel}
 \usepackage{titling}
 \usepackage{amssymb}
-\usepackage[margin=1.5cm, lmargin=2.5cm]{geometry}
+\usepackage[rmargin=1.5cm,lmargin=2.5cm,tmargin=1.5cm,bmargin=1.5cm]{geometry}
 
 \usepackage{tikz}
 \usepackage{graphicx}
 \usepackage{caption}
+\usepackage{subcaption}
 \usepackage{pythonhighlight}
 \graphicspath{ {./images/} }
 \newcommand*\circled[1]{\tikz[baseline=(char.base)]{
@@ -39,17 +40,18 @@
 \onehalfspace
 
 \usepackage{fontspec}
+\usepackage{algorithm} 
+\usepackage{algpseudocode}
  
 \setmainfont[SizeFeatures={Size=14}]{Times New Roman}
 \numberwithin{equation}{section}
+\numberwithin{algorithm}{subsection}
 \counterwithin{figure}{subsection}
 
 \title{Kinodynamic Motion Planning}
 \author{}
-
-
-
 \begin{document}
+
 \maketitle
 
 \section{Abstract}
@@ -120,15 +122,15 @@ Then, if trajectory is built, the point is added the tree.
 
 A common enhancement to this process is goal-biased sampling. In this case, with a parameterized probability instead of choosing a random point in $C_{free}$. This approach, however,
 has a flaw. If the tree has grown close to the $q_g$ with only one branch with last node $q_1$ and due to nonholomonic constraints cannot reach the $q_g$, all later samples that
-were changed on $q_g$ will get trapped by $q_1$, which has minimal distance to the $q_g$. Until a new point $q_2: dist(q_2, q_g) < dist(q_1, q_g)$ is added to the tree.
+were changed on $q_g$ will get trapped by $q_1$, which has minimal distance to the $q_g$, until a new point $q_2: dist(q_2, q_g) < dist(q_1, q_g)$ is added to the tree.
 In order to increase the chances of "untrapping" the $q_g$, we propose the following: since after sampling a point or choosing the $q_g$ as the sample point the algorithm tries to 
-find the nearest nodes already added to the tree, one could select a random node from the set of n-closest nodes without any computational drawback. 
+find the nearest nodes already added to the tree, one could select a random node from the set of n-closest nodes without any computational drawback.
 
-\begin{figure}
+\begin{figure}[H]
 \begin{center}
 \includegraphics[scale=0.7]{images/car_trapped.png}
 \captionsetup{width=0.6\textwidth}
-\caption{An example of a vehicle nonholonomically trapped due to angular precision. It stands at the finish point in the wrong direction.}
+\caption{An example of a vehicle nonholonomically trapped due to angular precision. It stands at the finish point in the wrong direction. RRT with goal sampling will fail to find a trajectory at each $q_g$ check.}
 \end{center}
 \end{figure}
 
@@ -141,6 +143,55 @@ While R-Tree does not drastically differ in complexity terms from a KD-Tree, it 
 but spatial data in forms of rectangles.
 
 Some works proposed the use of R-Trees as a structure for obstacles as well. However, in shaped that is not a rectangle and not perfectly aligned to the axes requires significantly
-more $\mathcal{C}_{free}$ space than it actually should.
+more $\mathcal{C}_{free}$ space than it actually should (Fig. 4.2.1a). Since it can drastically decrease performance of the algorithm at turns, we are proposing an algorithm for
+approximation of polygons to a set of axes-aligned rectangles. This kind of approximation of both obstacles and the car allows to store everything in the R-Tree. However, it would be more beneficial to store it in a differently configured R-Tree,
+as density and amount of data points is incomparable to those in the RRT nodes tree.
+
+\begin{algorithm}[H]
+    \caption{Boxify}
+    \begin{algorithmic}[1]
+    \State Input $O$: Obstacle, $p$: detalization factor 
+    \State $x_{min}$, $y_{min}$, $x_{max}$, $y_{max}$ = BoundingBox($O$)
+    \If {$y_{max} - y_{min} < x_{max} - x_{min}$}
+    \While {$y_{min} < y_{max}$}
+    \State $y_{up}$ = min($y_{max}, y_{min}+p$)
+    \State $O_{cut}$ = RectangleClip($O, x_{min}, y_{min}, x_{max}, y_{max}$)
+    \State $y_{min} = y_{min} + p$
+    \State yield $O_{cut}$
+    \EndWhile
+    \Else
+    \While {$x_{min} < x_{max}$}
+    \State $x_{up}$ = min($x_{max}, x_{min}+p$)
+    \State $O_{cut}$ = RectangleClip($O, x_{min}, y_{min}, x_{max}, y_{max}$)
+    \State $x_{min} = x_{min} + p$
+    \State yield $O_{cut}$
+    \EndWhile
+    \EndIf
+    \end{algorithmic}
+\end{algorithm}
+
+The function RectangleClip tries to find an intersection between the obstacle and given rectangle. Such function is defined and well optimized in various geometry engines (e.g. GEOS).
+
+\begin{figure}[H]
+\centering
+    \begin{subfigure}[b]{0.4\textwidth}
+        \includegraphics[scale=0.3,width=\textwidth]{images/car_bounding_box.png}
+        \caption{Bounding box false collision}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.4\textwidth}
+        \includegraphics[scale=0.3,width=\textwidth]{images/car_boxify_0_5.png}
+        \caption{Boxify p=0.5}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.4\textwidth}
+        \includegraphics[scale=0.3,width=\textwidth]{images/car_boxify_0_3.png}
+        \caption{Boxify p=0.3}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.4\textwidth}
+        \includegraphics[scale=0.3,width=\textwidth]{images/concave_boxify.png}
+        \caption{Boxify p=0.5}
+    \end{subfigure}
+    \captionsetup{width=0.6\textwidth}
+    \caption{An example of inefficient collision check with bounding boxes compared to the proposed function with different parameter.}
+\end{figure}
 
 \end{document}
